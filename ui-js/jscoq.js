@@ -30,7 +30,7 @@ class CoqWorker {
      * from which this script is loaded.
      */
     static defaultScriptPath() {
-        return new URL("../coq-js/jscoq_worker.bc.js", this.scriptUrl).href;
+        return new URL("/node_modules/coq-wasm/dist/worker.js", this.scriptUrl).href;
     }
 
     /**
@@ -67,7 +67,7 @@ class CoqWorker {
         if(this.options.debug) {
             console.log("Posting: ", msg);
         }
-        this.worker.postMessage(msg);
+        this.worker.postMessage(JSON.stringify(msg));
     }
 
     init(opts, lib_init, lib_path) {

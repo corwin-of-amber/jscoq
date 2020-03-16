@@ -33,7 +33,7 @@ class CoqLayoutClassic {
     </svg>
     <div id="toolbar">
       <div class="exits">
-        <i>js+</i><!--
+        <img height="20" src="${base_path}/ui-images/wa-logo.svg" style="position: relative; top: +3px"><i>+</i><!--
         --><a href="https://coq.inria.fr"><!--
           --><img src="https://coq.inria.fr/files/barron_logo.png" alt="Coq" height="35" style="vertical-align: middle">
         </a>

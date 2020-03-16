@@ -416,7 +416,7 @@ class CoqManager {
     async launch() {
         try {
             // Setup the Coq worker.
-            this.coq           = new CoqWorker(this.options.base_path + 'coq-js/jscoq_worker.bc.js');
+            this.coq           = new CoqWorker();
             this.coq.options   = this.options;
             this.coq.observers.push(this);
 
@@ -470,11 +470,18 @@ class CoqManager {
             this.layout.log(msg, 'Info');
     }
 
+    coqBoot() {
+        this.coq.sendCommand(["Init"]);
+    }
+
     /**
      * Called when the first state is ready.
      */
     coqReady(sid) {
+        console.log(sid);
         this.layout.splash(this.version_info, "Coq worker is ready.", 'ready');
+        this.doc.sentences[0].coq_sid = sid;
+        this.doc.fresh_id = sid + 1;
         this.enable();
     }
 
@@ -605,6 +612,14 @@ class CoqManager {
         }
 
         this.refreshGoals();
+    }
+
+    coqBackTo(sid) {
+        let new_tip = this.doc.stm_id[sid];
+        if (new_tip) {
+            this.truncate(new_tip, true);
+            this.refreshGoals();
+        }
     }
 
     coqGoalInfo(sid, goals) {
@@ -880,9 +895,19 @@ class CoqManager {
      * Removes all the sentences from stm to the end of the document.
      * If stm as an error sentence, leave the sentence itself (so that the
      * error mark remains visible), and remove all following sentences.
+     * @param stm a Sentence
+     * @param plus_one if `true`, will skip stm and set it to the
+     *   *following* sentence.
      */
-    truncate(stm) {
+    truncate(stm, plus_one=false) {
         let stm_index = this.doc.sentences.indexOf(stm);
+
+        if (stm_index === -1) return;
+
+        if (plus_one) {
+            stm = this.doc.sentences[++stm_index];
+            if (!stm) return;  /* this was the last sentence */
+        }
 
         if (stm.phase === Phases.ERROR) {
             // Do not clear the mark, to keep the error indicator.
