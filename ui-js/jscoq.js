@@ -22,6 +22,9 @@ class CoqWorker {
 
         this.when_created.then(() => {
             this.worker.onmessage = this._handler = evt => this.coq_handler(evt);
+            if (typeof window !== 'undefined')
+                window.addEventListener('unload', () =>
+                    this.worker && this.worker.terminate());
         });
     }
 
@@ -30,37 +33,16 @@ class CoqWorker {
      * from which this script is loaded.
      */
     static defaultScriptPath() {
-        return new URL("/node_modules/coq-wasm/dist/worker.js", this.scriptUrl).href;
-    }
-
-    /**
-     * Alternate script path, for when serving for source tree.
-     * (Basically removes `.bc` from the suffix.)
-     */
-    static alternateScriptPath(script_path) {
-        return script_path.replace(/\.bc\.js$/, '.js');
+        var nmPath = JsCoq.is_npm ? '../..' : '../node_modules';
+        return new URL(`${nmPath}/wacoq-bin/dist/worker.js`, this.scriptUrl).href;
     }
 
     async createWorker(script_path) {
-        let alt_script_path = this.constructor.alternateScriptPath(script_path);
-
-        this._worker_script = await
-            this.constructor._searchResource([script_path, alt_script_path]);
+        this._worker_script = script_path;
+        this._handler = evt => this.coq_handler(evt);
 
         this.worker = new Worker(this._worker_script)
-
-        if (typeof window !== 'undefined')
-            window.addEventListener('unload', () => this.worker.terminate());
-    }
-
-    static async _searchResource(urls) {
-        let head = (url) => new Promise((resolve, reject) =>
-            $.ajax({type: 'HEAD', dataType: 'text', url}).then(() => resolve(url)).fail(reject));
-
-        for (let url of urls) {
-            try { return await head(url); } catch { }
-        }
-        throw new Error(`resource not found; [${urls}]`);
+        this.worker.addEventListener('message', this._handler);
     }
 
     sendCommand(msg) {
@@ -70,8 +52,12 @@ class CoqWorker {
         this.worker.postMessage(JSON.stringify(msg));
     }
 
+    sendDirective(msg) {   // directives are intercepted by the JS part of the worker
+        this.worker.postMessage(msg);    // for this reason, they are not stringified
+    }
+
     init(opts, lib_init, lib_path) {
-        this.sendCommand(["Init", opts, lib_init, lib_path]);
+        this.sendCommand(["Init", {}]); //, opts, lib_init, lib_path]);
     }
 
     getInfo() {
@@ -123,8 +109,8 @@ class CoqWorker {
         this.sendCommand(["GetOpt", option_name]);
     }
 
-    loadPkg(base_path, pkg) {
-        this.sendCommand(["LoadPkg", base_path, pkg]);
+    loadPkg(url) {
+        this.sendDirective(["LoadPkg", url]);
     }
 
     infoPkg(base_path, pkgs) {
@@ -164,7 +150,7 @@ class CoqWorker {
         if (typeof SharedArrayBuffer !== 'undefined') {
             this.intvec = new Int32Array(new SharedArrayBuffer(4));
             try {
-                this.sendCommand(["InterruptSetup", this.intvec]);
+                this.sendDirective(["InterruptSetup", this.intvec]);
             }
             catch (e) {  /* this fails in Firefox 72 even with SharedArrayBuffer enabled */
                 console.warn('SharedArrayBuffer is available but not serializable -- interrupts disabled');
@@ -185,11 +171,11 @@ class CoqWorker {
     restart() {
         this.sids = [, new Future()];
 
+        this.worker.removeEventListener('message', this._handler);
         this.worker.terminate();  // kill!
 
         // Recreate worker
-        this.worker = new Worker(this._worker_script);
-        this.worker.onmessage = this._handler = evt => this.coq_handler(evt);
+        this.createWorker(this._worker_script);
     }
 
     // Promise-based APIs

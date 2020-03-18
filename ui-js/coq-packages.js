@@ -19,6 +19,8 @@ class PackageManager {
         this.loaded_pkgs   = [];
         this.coq           = coq;
 
+        this.coq.observers.push(this);
+
         this.initializePackageList(packages, pkg_path_aliases);
     }
 
@@ -48,9 +50,17 @@ class PackageManager {
         }
     }
 
+    static defaultPkgPath() {
+        return new URL('../bin/coq/', CoqWorker.defaultScriptPath()).href;
+    }
+
     populate() {
-        for (let [base_uri, pkgs] of Object.entries(this.packages_by_uri)) {
-            this.coq.infoPkg(base_uri, pkgs);
+        // @todo Read packages infos from JSON
+        var pkg_path = PackageManager.defaultPkgPath();
+
+        for (let pkg of this.packages) {
+            this.addBundleInfo(pkg.name, {desc: pkg.name, deps: [], 
+                archive: `${pkg_path}/${pkg.name}.coq-pkg`});
         }
     }
 
@@ -209,19 +219,12 @@ class PackageManager {
 
         if (pkg.promise) return pkg.promise;  /* load issued already */
 
-        if (pkg.archive) {
-            promise = 
-                Promise.all([this.loadDeps(pkg.info.deps),
-                             pkg.archive.unpack(this.coq)])
-                .then(() => this.onBundleLoad(pkg_name));
-        }
-        else {
-            promise = 
-                Promise.all([this.loadDeps(pkg.info.deps),
-                             this.loadPkg(pkg_name)]);
-        }
+        var url = pkg.archive && pkg.archive.url.href;
 
-        pkg.promise = promise;
+        pkg.promise = 
+            Promise.all([this.loadDeps(pkg.info.deps),
+                         this.loadPkg(pkg_name, url)]);
+
         return promise;
     }
 
@@ -242,8 +245,8 @@ class PackageManager {
             $(bundle.div).append($('<div>').addClass('rel-pos').append(bundle.bar));
         }
 
-        if (info) {
-            var progress = info.loaded / info.total,
+        if (info && info.total) {
+            var progress = info.downloaded / info.total,
                 angle    = (progress * 1500) % 360;
             bundle.egg.css('transform', `rotate(${angle}deg)`);
             bundle.bar.css('width', `${Math.min(1.0, progress) * 100}%`);
@@ -274,6 +277,27 @@ class PackageManager {
         .catch(err => { alert(`${file.name}: ${err}`); });
     }
 
+    _packageByURL(url) {
+        var s = url.toString();
+        for (let pkg of this.packages) {
+            if (s == pkg.archive.url) return pkg.name;
+        }
+    }
+
+    coqLibProgress(evt) {
+        var url = new URL(evt.uri, new URL(this.coq._worker_script)),
+            pkg_name = this._packageByURL(url);
+
+        if (pkg_name) {
+            if (evt.done) {
+                this.onBundleLoad(pkg_name);
+            }
+            else {
+                this.showPackageProgress(pkg_name, evt.download);
+            }
+        }
+    }
+
     onBundleStart(bname) {
         this.showPackageProgress(bname);
     }
@@ -290,6 +314,7 @@ class PackageManager {
 
         var pkg =  this.getPackage(bname);
         if (pkg._resolve) pkg._resolve();
+        else pkg.promise = Promise.resolve();
 
         this.showPackageCompleted(bname);
     }
@@ -300,12 +325,12 @@ class PackageManager {
             deps.map(pkg => this.startPackageDownload(pkg)));
     }
 
-    loadPkg(pkg_name) {
+    loadPkg(pkg_name, url) {
         var pkg = this.getPackage(pkg_name);
 
         return new Promise((resolve, reject) => {
             pkg._resolve = resolve 
-            this.coq.loadPkg(pkg.base_uri, pkg_name);
+            this.coq.loadPkg(url);
         });
     }
 
@@ -372,11 +397,6 @@ class CoqPkgInfo {
 
     setInfo(info) {
         this.info = info;
-
-        // Compute total number of files
-        info.loaded = 0;
-        info.total  = info.pkgs.map(pkg => pkg.vo_files.length)  // pkg.cma_files.length XXX
-                               .reduce((x, y) => x + y, 0);
 
         // Get archive if specified
         if (info.archive)

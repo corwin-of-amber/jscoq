@@ -33,9 +33,9 @@ class CoqLayoutClassic {
     </svg>
     <div id="toolbar">
       <div class="exits">
-        <img height="20" src="${base_path}/ui-images/wa-logo.svg" style="position: relative; top: +3px"><i>+</i><!--
+        <img height="20" src="${base_path}/ui-images/wa-logo.svg" style="vertical-align: top; margin-top: 3px"><i>+</i><!--
         --><a href="https://coq.inria.fr"><!--
-          --><img src="https://coq.inria.fr/files/barron_logo.png" alt="Coq" height="35" style="vertical-align: middle">
+          --><img src="https://coq.inria.fr/files/barron_logo.png" alt="Coq" height="35" style="vertical-align: middle; margin-left: -1px">
         </a>
         <!-- 
         <a href="http://feever.fr/" target="_blank">
@@ -52,7 +52,7 @@ class CoqLayoutClassic {
         <button name="reset"       alt="Reset worker"            title="Reset worker"></button>
       </span>
       <div class="exits right">
-        <a href="https://github.com/ejgallego/jscoq" class="link-to-github">Readme @</a>
+        <a href="https://github.com/ejgallego/jscoq" class="link-to-github"></a>
       </div> <!-- /.exits -->
     </div> <!-- /#toolbar -->
     <div class="flex-container">

@@ -364,7 +364,7 @@ class CoqManager {
             if (entry.kind == 'lemma')
                 this.contextual_info.showCheck(fullname, /*opaque=*/true);
         };
-        provider.onTipOut = () => { this.contextual_info.hide(); };
+        provider.onTipOut = () => { if (this.contextual_info) this.contextual_info.hide(); };
 
         return provider;
     }
@@ -440,9 +440,6 @@ class CoqManager {
             // The fun starts: fetch package infos,
             // and load init packages once they are available
             this.packages.populate();
-
-            await this.packages.loadDeps(this.options.init_pkgs);
-            this.coqInit();
         }
         catch (err) {
             this.handleLaunchFailure(err);
@@ -470,15 +467,15 @@ class CoqManager {
             this.layout.log(msg, 'Info');
     }
 
-    coqBoot() {
-        this.coq.sendCommand(["Init"]);
+    async coqBoot() {
+        await this.packages.loadDeps(this.options.init_pkgs);
+        this.coqInit();
     }
 
     /**
      * Called when the first state is ready.
      */
     coqReady(sid) {
-        console.log(sid);
         this.layout.splash(this.version_info, "Coq worker is ready.", 'ready');
         this.doc.sentences[0].coq_sid = sid;
         this.doc.fresh_id = sid + 1;
@@ -591,7 +588,7 @@ class CoqManager {
 
         this.packages.loadDeps(pkg_deps).then(() => ontop_finished)
             .then(() => {
-                this.coq.reassureLoadPath(this.packages.getLoadPath());
+                //this.coq.reassureLoadPath(this.packages.getLoadPath());
                 this.coq.resolve(ontop.coq_sid, nsid, stm.text);
                 cleanup();
             });
@@ -659,14 +656,6 @@ class CoqManager {
         this.packages.addBundleInfo(bname, bi);
     }
 
-    coqLibProgress(evt) {
-        this.packages.onPkgProgress(evt);
-    }
-
-    coqLibLoaded(bname) {
-        this.packages.onBundleLoad(bname);
-    }
-
     coqCoqExn(loc, sids, msg) {
         console.error('Coq Exception', msg);
 
@@ -716,7 +705,7 @@ class CoqManager {
         // Set startup parameters
         let init_opts = {implicit_libs: this.options.implicit_libs, stm_debug: false,
                          coq_options: this._parseOptions(this.options.coq || {})},
-            load_path = this.packages.getLoadPath(),
+            load_path = [], //this.packages.getLoadPath(),
             load_lib = this.options.prelude ? [PKG_ALIASES.prelude] : [];
 
         for (let pkg of this.options.init_import || []) {
