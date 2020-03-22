@@ -117,8 +117,8 @@ class CoqWorker {
         this.sendCommand(["InfoPkg", base_path, pkgs]);
     }
 
-    reassureLoadPath(load_path) {
-        this.sendCommand(["ReassureLoadPath", load_path]);
+    refreshLoadPath(load_path) {
+        this.sendCommand(["RefreshLoadPath"]);
     }
 
     put(filename, content, transferOwnership=false) {

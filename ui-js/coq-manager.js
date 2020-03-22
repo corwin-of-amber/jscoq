@@ -251,7 +251,7 @@ class CoqManager {
             wrapper_id: 'ide-wrapper',
             theme:      'light',
             base_path:   "./",
-            pkg_path:    "../coq-pkgs/",  // this is awkward: package path is relative to the worker location (coq-js)
+            pkg_path:    "-",   // use default from PackageManager
             implicit_libs: false,
             init_pkgs: ['init'],
             all_pkgs:  ['init', 'mathcomp',
@@ -568,9 +568,8 @@ class CoqManager {
 
         var pkg_deps = new Set();
         for (let module_name of module_names) {
-            let binfo = this.packages.searchModule(prefix, module_name);
-            if (binfo)
-                for (let d of binfo.deps) pkg_deps.add(d);
+            let deps = this.packages.index.findPackageDeps(prefix, module_name)
+            for (let dep of deps) pkg_deps.add(dep);
         }
 
         for (let d of this.packages.loaded_pkgs) pkg_deps.delete(d);
@@ -588,7 +587,7 @@ class CoqManager {
 
         this.packages.loadDeps(pkg_deps).then(() => ontop_finished)
             .then(() => {
-                //this.coq.reassureLoadPath(this.packages.getLoadPath());
+                this.coq.refreshLoadPath();
                 this.coq.resolve(ontop.coq_sid, nsid, stm.text);
                 cleanup();
             });

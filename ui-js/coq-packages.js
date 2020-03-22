@@ -55,13 +55,14 @@ class PackageManager {
     }
 
     populate() {
-        // @todo Read packages infos from JSON
-        var pkg_path = PackageManager.defaultPkgPath();
+        this.index = new PackageIndex();
 
-        for (let pkg of this.packages) {
-            this.addBundleInfo(pkg.name, {desc: pkg.name, deps: [], 
-                archive: `${pkg_path}/${pkg.name}.coq-pkg`});
-        }
+        return Promise.all(this.packages.map(async pkg => {
+            var manifest = await pkg.fetchInfo();
+            pkg.setArchive();
+            this.addBundleInfo(pkg.name, manifest);
+            this.index.add(manifest);
+        }));
     }
 
     getPackage(pkg_name) {
@@ -75,13 +76,15 @@ class PackageManager {
         var div  = document.createElement('div');
         var row = $(div);
 
+        bname = bname || pkg_info.name;
+
         row.attr('data-name', bname);
         row.data('info', pkg_info);
 
         row.append($('<button>').addClass('download-icon')
-                   .click(() => { this.startPackageDownload(pkg_info.desc); }));
+                   .click(() => { this.loadPkg(bname); }));
 
-        row.append($('<span>').text(pkg_info.desc));
+        row.append($('<span>').text(pkg_info.name));
 
         // Find bundle's proper place in the order among existing entries
         var pkg_names = this.packages.map(p => p.name),
@@ -99,14 +102,7 @@ class PackageManager {
 
         this.panel.insertBefore(div, place_before /* null == at end */ );
 
-        var pkg = this.getPackage(bname);
-        pkg.setInfo(pkg_info);
-
         this.bundles[bname] = { div: div };
-
-        if (pkg.archive) {
-            pkg.archive.onProgress = evt => this.showPackageProgress(bname, evt);
-        }
 
         this.dispatchEvent(new Event('change'));
     }
@@ -179,25 +175,6 @@ class PackageManager {
         }
     }
 
-    searchModule(prefix, module_name, exact=false) {
-        var binfo = this.searchBundleInfo(prefix, module_name, exact),
-            lookupDeps = (binfo, key) =>
-                (binfo && binfo.info.modDeps && binfo.info.modDeps.hasOwnProperty(key))
-                    ? binfo.info.modDeps[key] : [];
-        if (binfo) {
-            var pkgs = new Set([binfo.pkg]),
-                module_deps = lookupDeps(binfo, binfo.module.join('.'));
-            this._scan(module_deps,
-                m => {
-                    var binfo = this.searchBundleInfo([], m.split('.'), true);
-                    if (binfo) pkgs.add(binfo.pkg);
-                    return lookupDeps(binfo, m);
-                });
-            binfo.deps = [...pkgs.values()];
-        }
-        return binfo;
-    }
-
     getUrl(pkg_name, resource) {
         return this.packages_by_name[pkg_name].getUrl(resource);
     }
@@ -208,24 +185,6 @@ class PackageManager {
                 phys = pkg.archive ? ['/lib'] : [];
             return pkg.info.pkgs.map( pkg => [pkg.pkg_id, phys] );
         }).flatten();
-    }
-
-    /**
-     * Loads a package from the preconfigured path.
-     * @param {string} pkg_name name of package (e.g., 'init', 'mathcomp')
-     */
-    startPackageDownload(pkg_name) {
-        var pkg = this.getPackage(pkg_name), promise;
-
-        if (pkg.promise) return pkg.promise;  /* load issued already */
-
-        var url = pkg.archive && pkg.archive.url.href;
-
-        pkg.promise = 
-            Promise.all([this.loadDeps(pkg.info.deps),
-                         this.loadPkg(pkg_name, url)]);
-
-        return promise;
     }
 
     /**
@@ -272,7 +231,7 @@ class PackageManager {
         this.expand();
         this.addBundleZip(undefined, file).then(pkg => {
             this.bundles[pkg.name].div.scrollIntoViewIfNeeded();
-            this.startPackageDownload(pkg.name);
+            this.loadPkg(pkg.name);
         })
         .catch(err => { alert(`${file.name}: ${err}`); });
     }
@@ -319,19 +278,29 @@ class PackageManager {
         this.showPackageCompleted(bname);
     }
 
+    /**
+     * Loads a package from the preconfigured path.
+     * @param {string} pkg_name name of package (e.g., 'init', 'mathcomp')
+     */
+    loadPkg(pkg_name) {
+        var pkg = this.getPackage(pkg_name);
+
+        if (pkg.promise) return pkg.promise;  /* load issued already */
+
+        var pre = this.loadDeps(pkg.info.deps || []),
+            load = new Promise((resolve, reject) => {
+                       pkg._resolve = resolve 
+                       this.coq.loadPkg(pkg.getDownloadURL());
+                   });
+
+        pkg.promise = Promise.all([pre, load]);
+        return pkg.promise;
+    }
+
     async loadDeps(deps) {
         await this.waitFor(deps);
         return Promise.all(
-            deps.map(pkg => this.startPackageDownload(pkg)));
-    }
-
-    loadPkg(pkg_name, url) {
-        var pkg = this.getPackage(pkg_name);
-
-        return new Promise((resolve, reject) => {
-            pkg._resolve = resolve 
-            this.coq.loadPkg(url);
-        });
+            deps.map(pkg => this.loadPkg(pkg)));
     }
 
     /**
@@ -380,6 +349,59 @@ class PackageManager {
 }
 
 
+/**
+ * Holds list of modules in packages and resolves dependencies.
+ */
+class PackageIndex {
+
+    constructor() {
+        this.moduleIndex = new Map();
+    }
+
+    add(pkgInfo) {
+        for (let mod in pkgInfo.modules || {})
+            this.moduleIndex.set(mod, pkgInfo);
+    }
+
+    *findModules(prefix, suffix) {
+        prefix = prefix ? prefix + '.' : '';
+        var dotsuffix = '.' + suffix;
+        for (let k of this.moduleIndex.keys()) {
+            if (k.startsWith(prefix) && (k == suffix || k.endsWith(dotsuffix)))
+                yield k;
+        }
+    }
+
+    findPackageDeps(prefix, suffix) {
+        var pdeps = new Set();
+        for (let m of this.alldeps(this.findModules(prefix, suffix)))
+            pdeps.add(this.moduleIndex.get(m).name);
+        return pdeps;
+    }
+
+    alldeps(mods) {
+        return closure(new Set(mods), mod => {
+            let pkg = this.moduleIndex.get(mod),
+                o = (pkg && pkg.modules || {})[mod];
+            return (o && o.deps) || [];
+        });
+    }
+    
+}
+
+
+// function closure<T>(s: Set<T>, tr: (t: T) => T[]) {
+function closure(s, tr) {
+    var wl = [...s];
+    while (wl.length > 0) {
+        var u = wl.shift();
+        for (let v of tr(u))
+            if (!s.has(v)) { s.add(v); wl.push(v); }
+    }
+    return s;
+}
+
+
 class CoqPkgInfo {
     constructor(name, base_uri) {
         this.name = name;
@@ -395,12 +417,18 @@ class CoqPkgInfo {
                   new URL(this.base_uri, PackageManager.scriptUrl));
     }
 
-    setInfo(info) {
-        this.info = info;
+    getDownloadURL() {
+        // @todo create blob url for dropped files
+        return this.archive && this.archive.url.href;
+    }
 
-        // Get archive if specified
-        if (info.archive)
-            this.archive = new CoqPkgArchive(this.getUrl(info.archive));
+    async fetchInfo(resource = `${this.name}.json`) {
+        var req = await fetch(this.getUrl(resource));
+        return this.info = await req.json();
+    }
+
+    setArchive(resource = `${this.name}.coq-pkg`) {
+        this.archive = new CoqPkgArchive(this.getUrl(resource));
     }
 }
 
