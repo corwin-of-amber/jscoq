@@ -15,14 +15,19 @@ intra-line indentation. We compile with a very strict set of warnings.
 
 We recommend that most non-trivial changes take place using pull
 requests. Any contributor can merge a pull request [including their
-own] provide the pull request:
+own] provided the pull request:
 
 - has updated the `CHANGES.md` file,
 - passes Travis CI,
 - has at least one approving review from other contributor.
 
-Exceptions to this rule is when a review cannot happen due to lack of
-a second contributor with that particular expertise.
+This last rule should be considered soft; if a review doesn't happen
+in a reasonable amount of time, or you know what you are doing and
+need the change in, feel free to merge right away.
+
+We'd like to keep the development style agile, so in this project we
+much favor code development vs Pull-Request bureaucracy, and we are
+happy to merge imperfect code.
 
 We prefer GPG signed commits as well as `Signed-off-by` commits.
 
