@@ -16,12 +16,13 @@ class CoqProject {
         this.cmos = [];
         this.vfiles = [];
 
-        this.json_format_opts = 
-            { padding: 1, afterColon: 1, afterComma: 1, wrap: 80 };
-
-        this.zip_file_opts = 
-            { date: new Date("1/1/2000 UTC"), // dummy date (otherwise, zip changes every time it is created...)
-              createFolders: false };
+        this.opts = {
+            json: { padding: 1, afterColon: 1, afterComma: 1, wrap: 80 },
+            zip: {
+                compression: 'DEFLATE', createFolders: false,
+                date: new Date("1/1/2000 UTC") // dummy date (otherwise, zip changes every time it is created...)
+            }     
+        };
     }
 
     add(base_dir, base_name) {
@@ -124,7 +125,7 @@ class CoqProject {
 
     createManifestJSON(name=undefined, props={}) {
         return neatjson.neatJSON(this.createManifest(name, props), 
-                                 this.json_format_opts);
+                                 this.opts.json);
     }
 
     writeManifest(to_file, name=undefined, props={}) {
@@ -138,14 +139,14 @@ class CoqProject {
         if (save_as) name = name || this._guessName(save_as);
 
         var z = new JSZip();
-        z.file('coq-pkg.json', this.createManifestJSON(name, props));
+        z.file('coq-pkg.json', this.createManifestJSON(name, props), this.opts.zip);
         for (let fn of this.vfiles) {
             let logical_name = this.toLogicalName(fn);
             if (logical_name) {
                 var lfile = this._localFile(`${fn}o`);
                 if (lfile)
                     z.file(`${this.fsif.path.join(...logical_name)}.vo`, lfile,
-                           this.zip_file_opts);
+                           this.opts.zip);
             }
             else
                 console.warn(`skipped '${fn}' (not in path).`);
@@ -178,6 +179,26 @@ class CoqProject {
             return this.fsif.fs.statSync(p).isDirectory();
         }
         catch (e) { return false; }
+    }
+
+    copyLogical() {
+        var store = new FileStore();
+
+        // Read project file and store all .v files in transient folders
+        // according to their logical paths
+        for (let vfile of this.vfiles) {
+            var logical = this.toLogicalName(vfile);
+            if (logical) {
+                store.create(`/${logical.join('/')}.v`,
+                             this.fsif.fs.readFileSync(vfile));
+            }
+        }
+
+        var c = new CoqProject(store.fsif);
+        c.store = store;
+        c.addRecursive('/', []);
+        c.collectModules();
+        return c;
     }
 
     /**
@@ -376,10 +397,10 @@ class CoqC {
 
         this.coq.coq.observers.push(this, dummy);
 
-        this.json_format_opts = 
-            { padding: 1, afterColon: 1, afterComma: 1, wrap: 80 };
-        this.zip_file_opts = 
-            { createFolders: false };
+        this.opts = { 
+            json: { padding: 1, afterColon: 1, afterComma: 1, wrap: 80 },
+            zip: { createFolders: false }
+        };
     }
 
     spawn() {
@@ -438,7 +459,7 @@ class CoqC {
         else {
             var entry = entries, pkg_id = entry.dirpath.slice(0, -1),
                 root = this.output.root,
-                in_fn = upload ? `/static/_build/${entry.dirpath.join('/')}.v` : entry.input,
+                in_fn = upload ? `/lib/${entry.dirpath.join('/')}.v` : entry.input,
                 out_fn = `${this.fsif.path.join(...entry.dirpath)}.vo`,
                 out_fn_abs = this.fsif.path.join(root, out_fn);
 
@@ -473,7 +494,7 @@ class CoqC {
         if (idx > -1) this.coq.coq.observers.splice(idx, 1);
     }
 
-    coqGot(filename, buf) {
+    coqCompiled(filename, buf) {
         if (!this.coq.when_done.isFailed()) {
             var rel = this.fsif.path.relative(this.output.root, filename);
             this.output.vo[rel] = buf;
@@ -485,9 +506,9 @@ class CoqC {
               name = save_as ? path.basename(save_as).replace(/[.][^.]*$/,'') : undefined;
         var z = new JSZip();
         z.file('coq-pkg.json', neatjson.neatJSON(this.createManifest(name), 
-                                                 this.json_format_opts));
+                                                 this.opts.json));
         for (let fn in this.output.vo) {
-            z.file(fn, this.output.vo[fn], this.zip_file_opts);
+            z.file(fn, this.output.vo[fn], this.opts.zip);
         }
         if (save_as) {
             return z.generateNodeStream()
@@ -567,8 +588,7 @@ class CoqC {
 class CoqBuild {
 
     constructor() {
-        this.store = new FileStore();
-        this.view = undefined;
+        this.ui = {project: undefined, report: undefined};
 
         this.options = {
             upload: true
@@ -577,28 +597,23 @@ class CoqBuild {
         this._ongoing = new Set();
     }
 
-    startNew() {
-        if (this.view) this.view.$refs.file_list.clear();
-        this.store = new FileStore();
+    clear() {
+        if (this.coqc) {
+            this.coqc.output.vo = {};
+            this.coqc.output.errors = {};
+        }
         this._ongoing.clear();
         return this;
     }
 
+    ofProject(project, is_logical=false) {
+        this.project = is_logical ? project : project.copyLogical();
+        this._updateView();
+        return this;
+    }
+
     ofDirectory(dir, fsif=fsif_native) {
-        // Read project file and store all .v files in transient folders
-        // according to their logical paths
-        var physical = CoqProject.fromFileOrDirectory(dir, null, fsif);
-
-        for (let vfile of physical.vfiles) {
-            var logical = physical.toLogicalName(vfile);
-            if (logical) {
-                this.store.create(`/${logical.join('/')}.v`,
-                                  fsif.fs.readFileSync(vfile));
-            }
-        }
-
-        this._openProject();
-        return Promise.resolve(this);
+        return this.ofProject(CoqProject.fromFileOrDirectory(dir, null, fsif));
     }
 
     ofZip(zip) {
@@ -618,20 +633,13 @@ class CoqBuild {
     prepare(coq) {
         const {HeadlessCoqManager} = require('./coq-cli');
 
-        // Compute module dependencies with CoqDep
-        if (this.project) {
-            var coqdep = new CoqDep(this.store.fsif);
-            coqdep.processProject(this.project);
-            this.plan = coqdep.buildPlan(this.project);
-        }
-
         // Create a worker and a compiler instance
         this.coq = coq || this.coq || new HeadlessCoqManager(
             (typeof CoqWorker !== 'undefined') ? new CoqWorker : undefined,
-            this.store.fsif);
+            this.project && this.project.fsif);
         Object.assign(this.coq.options, this.options);
 
-        this.coqc = new CoqC(this.coq, this.store.fsif);
+        this.coqc = new CoqC(this.coq, this.project && this.project.fsif);
         this.coqc.onprogress = ev => this._onProgress(ev);
 
         this._ongoing.clear();
@@ -640,7 +648,17 @@ class CoqBuild {
         return this.coq.coq.when_created;
     }
 
+    mkdeps() {
+        // Compute module dependencies with CoqDep
+        var coqdep = new CoqDep(this.project.fsif);
+        coqdep.processProject(this.project);
+        this.plan = coqdep.buildPlan(this.project);
+    }
+
     async start() {
+        if (!this.coqc) await this.prepare();
+        if (!this.plan) this.mkdeps();
+
         if (this.editor_provider && this.editor_provider.dirty)
             await this.editor_provider.saveLocal();
 
@@ -648,19 +666,8 @@ class CoqBuild {
     }
 
     restart() {
-        this.coqc.output.vo = {};
-        this.coqc.output.errors = {};
-
+        this.clear();
         return this.start();
-    }
-
-    _openProject(dir="/") {
-        this.project = new CoqProject(this.store.fsif);
-        this.project.addRecursive(dir, []);
-        this.project.collectModules();
-
-        this._ongoing.clear();
-        this._updateView();
     }
 
     _onProgress(ev) {
@@ -678,80 +685,48 @@ class CoqBuild {
     // UI Part
     // =======
 
-    withUI(project_dom, report_dom=null) {
-        require('./components/file-list');
-        require('./components/problem-list');
-
-        this.view = new Vue({
-            el: project_dom,
-            data: {
-                files: []
-            }
-        });
-
-        this.view.$on('action', ev => this.onAction(ev));
+    withUI(project, report_dom=null) {
+        this.ui.project = project instanceof ProjectPanel
+            ? project : new ProjectPanel(project);
 
         if (report_dom) {
-            this.report = new Vue({
+            this.ui.report = new Vue({
                 el: report_dom,
                 data: {
                     errors: []
                 }
             });
 
-            this.report.$refs.problem_list.pprint = new FormatPrettyPrint();
+            this.ui.report.$refs.problem_list.pprint = new FormatPrettyPrint();
         }
 
         this._updateView();
         return this;
     }
 
-    withEditor(editor_provider) {
-        this.editor_provider = editor_provider;
-
-        // Only one editor store can exist at any given time :/
-        const store = this.store;
-        CmCoqProvider.file_store = {
-            async getItem(filename) { return store.readFileSync(filename, 'utf-8'); },
-            async setItem(filename, content) { store.file_map.set(filename, content); }
-        };
-    }
-
-    onAction(ev) {
-        if (this.editor_provider 
-              && ev.type === 'select' && ev.kind === 'file') {
-            this._openSourceFile(`/${ev.path.join('/')}`);
-        }
-    }
-
     _updateView() {
-        // TODO might be better to use a Vue computed property instead
-        if (this.view) {
-            for (let fn of this.store.file_map.keys()) {
-                var e = this.view.$refs.file_list.create(fn),
-                    status = this._fileStatus(fn);
-                e.tags = status ? [CoqBuild.BULLETS[status]] : [];
-            }
+        // @todo emit an event instead and let ProjectPanel handle it
+        if (this.ui.project) {
+            this.ui.project.view.files = this.project.vfiles
+                .map(filename => (
+                    {filename, status: this._fileStatus(filename)}));
         }
 
-        if (this.report && this.coqc) {
-            this.report.errors = Object.values(this.coqc.output.errors);
+        if (this.ui.report && this.coqc) {
+            this.ui.report.errors = Object.values(this.coqc.output.errors);
         }
     }
 
     _fileStatus(fn) {
         if (this._ongoing.has(fn)) return 'compiling';
 
-        var vo_fn = `${fn.replace(/^[/]*/, '')}o`;
-        if (this.coqc && this.coqc.output.vo.hasOwnProperty(vo_fn))
-            return 'compiled';
-        else if (this.coqc.output.errors.hasOwnProperty(fn))
-            return 'error';
-    }
-
-    async _openSourceFile(filename) {
-        await this.editor_provider.openLocal(filename);
-        this._updateMarks();
+        if (this.coqc) {
+            var vo_fn = `${fn.replace(/^[/]*/, '')}o`;
+            if (this.coqc.output.vo.hasOwnProperty(vo_fn))
+                return 'compiled';
+            else if (this.coqc.output.errors.hasOwnProperty(fn))
+                return 'error';
+        }
     }
 
     _updateMarks() {
@@ -782,8 +757,10 @@ CoqBuild.BULLETS = {
 };
 
 
+const {ProjectPanel} = require('./ide-project');
 
-module.exports = {CoqProject, CoqDep, CoqC, CoqBuild, FileStore}
+
+module.exports = {CoqProject, CoqDep, CoqC, CoqBuild, FileStore, ProjectPanel}
 
 
 

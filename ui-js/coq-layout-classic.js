@@ -96,7 +96,7 @@ class CoqLayoutClassic {
 
         // Our reference to the IDE, goal display & query buffer.
         this.ide   = document.getElementById(options.wrapper_id);
-        this.ide.classList.add(`layout-${options.layout || 'flex'}`);
+        this.ide.classList.add('jscoq-ide', `layout-${options.layout || 'flex'}`);
 
         this.panel = document.createElement('div');
         this.panel.id = 'panel-wrapper';
@@ -135,11 +135,13 @@ class CoqLayoutClassic {
     }
 
     show() {
+        this.ide.classList.add('goals-active');
         this.ide.classList.remove('toggled');
         this.onToggle({target: this, shown: true});
     }
 
     hide() {
+        this.ide.classList.remove('goals-active');
         this.ide.classList.add('toggled');
         this.onToggle({target: this, shown: false});
     }

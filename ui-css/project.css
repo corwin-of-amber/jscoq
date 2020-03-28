@@ -9,8 +9,12 @@
 }
 #outline-pane {
     width: 15%;
-    flex-grow: 0;
-    flex-shrink: 0;
+    flex-grow: 0 !important;
+    flex-shrink: 0 !important;
+    transition: width 0.2s ease-in-out;
+}
+.jscoq-ide.goals-active #outline-pane {
+    width: 7%;
 }
 #cnc-pane {
     width: 20%;
@@ -20,6 +24,9 @@
 #code-pane {
     flex-grow: 1;
     width: 200px; /* will serve as min width */
+}
+#project-wrapper {
+    flex-grow: 0 !important;
 }
 #project-panel {
     margin-bottom: 1em;   

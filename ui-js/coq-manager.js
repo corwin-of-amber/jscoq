@@ -251,7 +251,7 @@ class CoqManager {
             wrapper_id: 'ide-wrapper',
             theme:      'light',
             base_path:   "./",
-            pkg_path:    "-",   // use default from PackageManager
+            pkg_path:    PackageManager.defaultPkgPath(),
             implicit_libs: false,
             init_pkgs: ['init'],
             all_pkgs:  ['init', 'mathcomp',
@@ -409,6 +409,28 @@ class CoqManager {
         });
     }
 
+    async openProject() {
+        await this._load('ui-css/project.css');
+        var outline_pane = $('<div>').attr('id', 'outline-pane');
+        $(this.layout.ide).prepend(outline_pane);
+        await this._load('ui-js/coq-build.browser.js');
+
+        const {ProjectPanel} = coqBuild;
+        this.project = new ProjectPanel().withEditor(this.provider.snippets[0]);
+        outline_pane.append(this.project.$el);
+
+        this.project.open(ProjectPanel.sample());
+    }
+
+    _load(href) {
+        var uri = this.options.base_path + href,
+            el = href.endsWith('.css') ? 
+                $('<link>').attr({rel: 'stylesheet', type: 'text/css', href: uri})
+              : $('<script>').attr({type: 'text/javascript', src: uri});
+        document.head.appendChild(el[0]); // jQuery messes with load event
+        return new Promise(resolve => el.on('load', resolve));
+    }
+
     /**
      * Starts a Worker and commences loading of packages and initialization
      * of STM.
@@ -420,8 +442,8 @@ class CoqManager {
             this.coq.options   = this.options;
             this.coq.observers.push(this);
 
-            await this.coq.when_created;
-            this.coq.interruptSetup();
+            //await this.coq.when_created;
+            //this.coq.interruptSetup();
 
             // Setup package loader
             this.packages = new PackageManager(this.layout.packages,
@@ -702,8 +724,8 @@ class CoqManager {
             `===> Loaded packages [${this.options.init_pkgs.join(', ')}]`);
 
         // Set startup parameters
-        let init_opts = {implicit_libs: this.options.implicit_libs, stm_debug: false,
-                         coq_options: this._parseOptions(this.options.coq || {})},
+        let init_opts = {implicit_libs: this.options.implicit_libs},
+                        // @todo coq_options: this._parseOptions(this.options.coq || {})},
             load_path = [], //this.packages.getLoadPath(),
             load_lib = this.options.prelude ? [PKG_ALIASES.prelude] : [];
 

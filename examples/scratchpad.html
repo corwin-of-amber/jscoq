@@ -48,8 +48,10 @@
       document.getElementById('ide-wrapper')
               .setAttribute('data-filename', last_filename);
 
-    loadJsCoq(jscoq_opts.base_path)
-        .then( () => coq = new CoqManager(jscoq_ids, jscoq_opts) );
+    JsCoq.start(jscoq_opts).then(res => {
+      coq = res;
+      if (location.search == '?project') coq.openProject();
+    });
 
     window.addEventListener('beforeunload', () => {
       var sp = coq.provider.snippets[0];

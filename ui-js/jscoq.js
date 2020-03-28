@@ -20,12 +20,7 @@ class CoqWorker {
                                   this.constructor.defaultScriptPath());
         }
 
-        this.when_created.then(() => {
-            this.worker.onmessage = this._handler = evt => this.coq_handler(evt);
-            if (typeof window !== 'undefined')
-                window.addEventListener('unload', () =>
-                    this.worker && this.worker.terminate());
-        });
+        this.worker.onmessage = this._handler = evt => this.coq_handler(evt);
     }
 
     /**
@@ -37,12 +32,17 @@ class CoqWorker {
         return new URL(`${nmPath}/wacoq-bin/dist/worker.js`, this.scriptUrl).href;
     }
 
-    async createWorker(script_path) {
+    createWorker(script_path) {
         this._worker_script = script_path;
-        this._handler = evt => this.coq_handler(evt);
 
         this.worker = new Worker(this._worker_script)
-        this.worker.addEventListener('message', this._handler);
+
+        if (typeof window !== 'undefined')
+            window.addEventListener('unload', () =>
+                this.worker && this.worker.terminate());
+
+        this._boot = new Future();
+        return this._boot.promise;
     }
 
     sendCommand(msg) {
@@ -57,7 +57,7 @@ class CoqWorker {
     }
 
     init(opts, lib_init, lib_path) {
-        this.sendCommand(["Init", {}]); //, opts, lib_init, lib_path]);
+        this.sendCommand(["Init", opts]); //, opts, lib_init, lib_path]);
     }
 
     getInfo() {
@@ -245,6 +245,11 @@ class CoqWorker {
         }
     }
 
+    coqBoot() {
+        if (this._boot)
+            this._boot.resolve();
+    }
+
     coqFeedback(fb_msg) {
 
         var feed_tag = fb_msg.contents[0];
@@ -305,6 +310,8 @@ class Future {
 
     resolve(val) { if (!this._done) { this._done = this._success = true; this._resolve(val); } }
     reject(err) { if (!this._done) { this._done = true; this._reject(err); } }
+
+    then(cont)      { return this.promise.then(cont); }
 
     isDone()        { return this._done; }
     isSuccessful()  { return this._success; }

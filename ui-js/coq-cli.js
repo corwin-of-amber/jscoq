@@ -61,8 +61,7 @@ class HeadlessCoqManager {
 
         // Initialize Coq
         let set_opts = {top_name: this.options.top_name,
-                        implicit_libs: this.options.implicit_libs,
-                        stm_debug: false},
+                        implicit_libs: this.options.implicit_libs},
             init_libs = this.options.prelude ? [["Coq", "Init", "Prelude"]] : [],
             load_path = this.project.path;
 
@@ -184,9 +183,9 @@ class HeadlessCoqManager {
         }
     }
 
-    coqGot(filename, buf) {
+    coqCompiled(filename, buf) {
         if (!this.when_done.isFailed()) {
-            this.coq.put(filename, buf);
+            //this.coq.put(filename, buf);
             console.log(` > ${filename}`);
             this.when_done.resolve();
         }

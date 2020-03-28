@@ -11,15 +11,13 @@
 "use strict";
 
 var loadJs = function(js) {
-    return function () {
-        return new Promise(function (resolve, error) {
-            var script    = document.createElement('script');
-            script.type   = 'text/javascript';
-            script.src    = js + '.js';
-            script.onload = resolve;
-            document.head.appendChild(script);
-        });
-    };
+    return new Promise(function (resolve, error) {
+        var script    = document.createElement('script');
+        script.type   = 'text/javascript';
+        script.src    = js + '.js';
+        script.onload = resolve;
+        document.head.appendChild(script);
+    });
 };
 
 var loadJsCoq, JsCoq;
@@ -48,7 +46,7 @@ var loadJsCoq, JsCoq;
     // - localForage
     // - jsCoq = cm-provider + coq-packages + coq-manager
 
-    loadJsCoq = function(base_path, node_modules_path) {
+    loadJsCoq = async function(base_path, node_modules_path) {
 
         base_path = base_path || JsCoq.base_path;
         if (/[^/]$/.exec(base_path)) base_path += "/";
@@ -86,9 +84,7 @@ var loadJsCoq, JsCoq;
                      base_path + 'ui-js/coq-layout-classic',
                      base_path + 'ui-js/coq-manager'];
 
-        return files.reduce(function(prom, file) {
-            return prom.then(loadJs(file));
-        }, Promise.resolve());
+        for (let js of files) await loadJs(js);
     };
 
     JsCoq = {
