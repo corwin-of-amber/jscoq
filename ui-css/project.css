@@ -13,9 +13,6 @@
     flex-shrink: 0 !important;
     transition: width 0.2s ease-in-out;
 }
-.jscoq-ide.goals-active #outline-pane {
-    width: 7%;
-}
 #cnc-pane {
     width: 20%;
     flex-grow: 0;

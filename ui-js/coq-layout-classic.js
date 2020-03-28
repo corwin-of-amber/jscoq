@@ -180,6 +180,13 @@ class CoqLayoutClassic {
         if (img.attr('src') !== overlay) img.attr('src', overlay);
     }
 
+    createOutline() {
+        var outline_pane = $('<div>').attr('id', 'outline-pane');
+        $(this.ide).prepend(outline_pane);
+        requestAnimationFrame(() => $(this.ide).addClass('outline-active'));
+        return this.outline = outline_pane[0];
+    }
+
     /**
      * Shows a notice in the main goal pane (reserved for important messages,
      * such as during startup).

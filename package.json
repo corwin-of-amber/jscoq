@@ -3,6 +3,7 @@
   "version": "0.11.0",
   "description": "A port of Coq to JavaScript -- run Coq in your browser",
   "dependencies": {
+    "array-equal": "^1.0.0",
     "bootstrap": "^3.4.1",
     "codemirror": "^5.49.2",
     "commander": "^5.0.0",
@@ -17,9 +18,14 @@
     "vue": "^2.6.10"
   },
   "devDependencies": {
+    "@types/node": "^13.9.5",
+    "browserify": "^16.2.3",
     "mocha": "^7.0.1",
-    "browserify": "^16.2.3"
+    "typescript": "^3.8.3"
   },
+  "browserslist": [
+    "Chrome 78"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ejgallego/jscoq.git"

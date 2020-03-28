@@ -409,17 +409,13 @@ class CoqManager {
         });
     }
 
-    async openProject() {
+    async openProject(name) {
+        var pane = this.layout.createOutline();
         await this._load('ui-css/project.css');
-        var outline_pane = $('<div>').attr('id', 'outline-pane');
-        $(this.layout.ide).prepend(outline_pane);
-        await this._load('ui-js/coq-build.browser.js');
+        await this._load('ui-js/ide-project.browser.js');
 
-        const {ProjectPanel} = coqBuild;
-        this.project = new ProjectPanel().withEditor(this.provider.snippets[0]);
-        outline_pane.append(this.project.$el);
-
-        this.project.open(ProjectPanel.sample());
+        this.project =
+            ideProject.ProjectPanel.attach(pane, this.provider, name);
     }
 
     _load(href) {
