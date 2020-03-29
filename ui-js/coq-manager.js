@@ -372,16 +372,31 @@ class CoqManager {
     setupDragDrop() {
         $(this.layout.ide).on('dragover', (evt) => {
             evt.preventDefault();
+            evt.originalEvent.dataTransfer.dropEffect = 'link';
         });
-        $(this.layout.ide).on('drop', (evt) => {
+        $(this.layout.ide).on('drop', async (evt) => {
             evt.preventDefault();
-            // TODO better check file type and size before
-            //  opening
-            var file = evt.originalEvent.dataTransfer.files[0];
-            if (file) {
-                if (file.name.match(/[.](coq-pkg|zip)$/))
+            var src = []
+            for (let item of evt.originalEvent.dataTransfer.items) {
+                var entry = item.webkitGetAsEntry && item.webkitGetAsEntry(),
+                    file = item.getAsFile && item.getAsFile();
+                if (file && file.name.match(/[.]coq-pkg$/))
                     this.packages.dropPackage(file);
                 else
+                    src.push({entry, file});
+            }
+            // Turn to source files
+            let project = () => this.project || 
+                                this.openProject().then(() => this.project);
+            if (src.length > 0) {
+                if (src.length > 1 || src[0].entry && src[0].entry.isDirectory)
+                    (await project()).openDirectory(
+                            src.map(({entry, file}) => entry || file));
+                else if (src[0].file && src[0].file.name.match(/[.]zip$/))
+                    (await project()).openZip(src[0].file, src[0].file.name);
+                else
+                    // TODO better check file type and size before
+                    //  opening
                     this.provider.openFile(file);
             }
         });

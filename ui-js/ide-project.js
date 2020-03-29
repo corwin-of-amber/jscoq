@@ -3,8 +3,11 @@
 
 import Vue from 'vue/dist/vue';
 import { BatchWorker, CompileTask } from './build/batch';
-import { CoqProject, InMemoryVolume } from './build/project';
+import { CoqProject, InMemoryVolume, ZipVolume } from './build/project';
 
+
+
+Object.assign(window, {CoqProject, InMemoryVolume, ZipVolume})
 
 
 class ProjectPanel {
@@ -27,33 +30,63 @@ class ProjectPanel {
         this.view.$watch('files', v => this._update(v, this.view.status));
         this.view.$watch('status', v => this._update(this.view.files, v), {deep: true});
         this.view.$on('action', ev => this.onAction(ev));
+        this.view.$on('new', () => this.clear());
         this.view.$on('build', () => this.build()
             .catch(e => { if (e[0] != 'CoqExn') throw e; }));
+        this.view.$on('download', () => this.download());
 
         this.editor_provider = undefined;
     }
 
     get $el() { return this.view.$el; }
 
+    clear() {
+        this.project = null;
+        this.view.root = [];
+        this.view.files = [];
+        this.view.status = {};
+    }
+
     open(project) {
         this.project = project;
+        this.view.root = [];
         this.view.files = [...project.modulesByExt('.v')]
                           .map(mod => mod.physical);
         this.view.status = {};
 
         this.report = new BuildReport(this.project);
+        this.report.editor = this.editor_provider;
 
         if (this.editor_provider) this._associateStore();
     }
 
-    withEditor(editor_provider) {
+    async openZip(zip, filename=undefined) {
+        let vol = (zip instanceof Promise || zip instanceof Blob) ?
+                    await ZipVolume.fromBlob(zip)
+                  : new ZipVolume(zip);
+        this.open(new CoqProject(filename.replace(/[.]zip$/, ''), vol)
+                  .fromDirectory('').copyLogical(new LogicalVolume()));
+    }
+
+    async openDirectory(entries /* (File | FileEntry | DirectoryEntry)[] */) {
+        let vol = new LogicalVolume();
+        for (let entry of entries) {
+            await vol.fromWebKitEntry(entry);
+        }
+        let name = entries.length == 1 ? entries[0].name : undefined;
+        this.open(new CoqProject(name, vol).fromDirectory('/'));
+    }
+
+    withEditor(editor_provider /* CmCoqProvider */) {
         this.editor_provider = editor_provider;
         if (this.project) this._associateStore();
+        if (this.report) this.report.editor = this.editor_provider;
         return this;
     }
 
     async build(coq) {
         this.view.status = {};
+        this.report.clear();
 
         if (this.editor_provider.dirty) this.editor_provider.saveLocal();
 
@@ -63,13 +96,33 @@ class ProjectPanel {
         var task = new CompileTask(new BatchWorker(coq.worker), this.project);
         task.on('progress', files => this._progress(files));
         task.on('report', e => this.report.add(e));
-        return task.run();
+        return this.out = await task.run();
+    }
+
+    async download() {
+        var fn, zip;
+        if (this.out) {
+            fn = `${this.out.name || 'project'}.coq-pkg`;
+            zip = (await this.out.toPackage(fn, ['.v', '.vo', '.cma'])).pkg.zip;
+        }
+        else if (this.project) {
+            fn = `${this.project.name || 'project'}.zip`;
+            zip = await this.project.toZip(undefined, ['.v', '.vo', '.cma']);
+        }
+        else return;
+
+        var blob = await zip.generateAsync({type: 'blob'}),
+            a = $('<a>').attr({'href': URL.createObjectURL(blob),
+                               'download': fn});
+        a[0].click();
     }
 
     _createDOM() {
         return $('<div>').attr('id', 'project-panel').html(`
             <div class="toolbar">
+                <button @click="$emit('new')">new</button>
                 <button @click="$emit('build')">build</button>
+                <button @click="$emit('download')">download</button>
             </div>
             <file-list ref="file_list" :files="root"
                        @action="$emit('action', $event)"/>
@@ -102,7 +155,8 @@ class ProjectPanel {
         if (this.editor_provider 
               && ev.type === 'select' && ev.kind === 'file') {
             this.editor_provider.openLocal(`/${ev.path.join('/')}`);
-            // @todo update marks (from build)
+            if (this.report)
+                requestAnimationFrame(() => this.report._updateMarks());
         }
     }
 
@@ -142,10 +196,37 @@ ProjectPanel.BULLETS = {
 };
 
 
+class LogicalVolume extends InMemoryVolume {
+
+    async fromWebKitEntry(entry /* DirectoryEntry | FileEntry */) {
+        await new Promise(resolve => {
+            if (entry.isFile) {
+                entry.file(async b => {
+                    let content = new Uint8Array(await b.arrayBuffer());
+                    this.writeFileSync(entry.fullPath, content);
+                    resolve();
+                });
+            }
+            else if (entry.isDirectory) {
+                let readdir = entry.createReader();
+                readdir.readEntries(async entries => {
+                    for (let e of entries) await this.fromWebKitEntry(e);
+                    resolve();
+                });
+            }
+        });
+        return this;
+    }
+
+}
+
+
 class BuildReport {
 
     constructor(inproj) {
         this.inproj = inproj;
+        this.errors = new Map();
+        this.editor = undefined;
     }
 
     add(e) {
@@ -153,24 +234,36 @@ class BuildReport {
         case 'CoqExn':
             var err = this.decorateError(e);
             coq.layout.log(err.msg, 'Error');   // oops
+            if (err.loc) {
+                this.errors.set(err.loc.filename,
+                    (this.errors.get(err.loc.filename) || []).concat([err]));
+                this._updateMarks();
+            }
             break;
         }
+    }
+
+    clear() {
+        this.errors = new Map();
+        this._updateMarks();
     }
 
     decorateError(coqexn) {
         let [, loc, , msg] = coqexn, err = {};
         // Convert character positions to {line, ch}
         if (loc) {
+            err.loc = {filename: loc.fname[1].replace(/^\/lib/, '')};
             try {
-                var fn = loc.fname[1].replace(/^\/lib/, ''),
+                var fn = err.loc.filename,
                     source = this.inproj.volume.fs.readFileSync(fn, 'utf-8');
-                err.loc = {start: BuildReport.posToLineCh(source, loc.bp),
-                           end:   BuildReport.posToLineCh(source, loc.ep)};
+                err.loc.start = BuildReport.posToLineCh(source, loc.bp);
+                err.loc.end =   BuildReport.posToLineCh(source, loc.ep);
             }
             catch (e) { console.warn('cannot get code location for', loc, e); }
         }
-        var at = `${loc.fname[1]}:${err.loc ? err.loc.start.line + 1 : '?'}`;
-        err.msg = $('<p>').text(`at ${at}:`)
+        var at = err.loc &&
+            `${err.loc.filename}:${err.loc.start ? err.loc.start.line + 1 : '?'}`
+        err.msg = $('<p>').text(`at ${at || '<unknown>'}:`).addClass('error-location')
                   .add(coq.pprint.pp2DOM(msg));  // oops
         return err;
     }
@@ -196,6 +289,24 @@ class BuildReport {
         return {line, ch};
     }
 
+    _updateMarks() {
+        if (this.editor) {
+            var filename = this.editor.filename;
+
+            for (let stm of this._active_marks || []) stm.mark.clear();
+            this._active_marks = [];
+
+            if (filename && this.errors.has(filename)) {
+                for (let e of this.errors.get(filename)) {
+                    if (e.loc && e.loc.start && e.loc.end) {
+                        var stm = {start: e.loc.start, end: e.loc.end};
+                        this._active_marks.push(stm);
+                        this.editor.mark(stm, 'error');
+                    }
+                }
+            }
+        }
+    }    
 }
 
 

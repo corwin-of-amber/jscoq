@@ -114,7 +114,7 @@ class CompileTask extends EventEmitter{
     }
         
     toPackage() {
-        return this.outproj.toPackage(undefined,
+        return this.outproj.toPackage(undefined, undefined,
             this.opts.jscoq ? CoqProject.backportToJsCoq : undefined);
     }
 

@@ -54,6 +54,12 @@
 
 /* Problem list styles */
 
+.msg-area .Error .error-location {
+    margin: 0;
+    background: #fff8f8;
+    color: #866;
+}
+
 ul.problem-list {
     list-style: none;
     margin: 0;
