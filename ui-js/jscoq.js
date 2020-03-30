@@ -4,7 +4,8 @@ class CoqWorker {
 
     constructor(scriptPath, worker) {
         this.options = {
-            debug: false
+            debug: false,
+            warn: true
         };
         this.observers = [this];
         this.routes = [this.observers];
@@ -240,7 +241,7 @@ class CoqWorker {
             }
          }
 
-         if (!handled) {
+         if (!handled && this.options.warn) {
             console.warn('Message ', msg, ' not handled');
         }
     }
@@ -269,7 +270,7 @@ class CoqWorker {
             }
         }
 
-        if (!handled) {
+        if (!handled && this.options.warn) {
             console.warn(`Feedback type ${feed_tag} not handled (route ${feed_route})`);
         }
     }
@@ -286,7 +287,7 @@ class CoqWorker {
             }
         }
 
-        if (!handled) {
+        if (!handled && this.options.warn) {
             console.warn(`SearchResults not handled (route ${rid})`);
         }
     }

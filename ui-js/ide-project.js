@@ -23,7 +23,8 @@ class ProjectPanel {
             data: {
                 files: [],
                 status: {},
-                root: []
+                root: [],
+                building: false
             }
         });
         
@@ -31,11 +32,12 @@ class ProjectPanel {
         this.view.$watch('status', v => this._update(this.view.files, v), {deep: true});
         this.view.$on('action', ev => this.onAction(ev));
         this.view.$on('new', () => this.clear());
-        this.view.$on('build', () => this.build()
-            .catch(e => { if (e[0] != 'CoqExn') throw e; }));
+        this.view.$on('build', () => this.buildTask ? (this.buildTask.stop())
+             : this.build().catch(e => { if (e[0] != 'CoqExn') throw e; }));
         this.view.$on('download', () => this.download());
 
         this.editor_provider = undefined;
+        this.package_index = undefined;
     }
 
     get $el() { return this.view.$el; }
@@ -84,19 +86,35 @@ class ProjectPanel {
         return this;
     }
 
+    withCoqManager(coq) {
+        this.coq = coq;
+        this.package_index = coq.packages.index;
+        return this.withEditor(coq.provider.snippets[0]);
+    }
+
     async build(coq) {
+        this.view.building = true;
         this.view.status = {};
         this.report.clear();
 
-        if (this.editor_provider.dirty) this.editor_provider.saveLocal();
+        try {
+            if (this.editor_provider && this.editor_provider.dirty)
+                this.editor_provider.saveLocal();
 
-        coq = coq || new CoqWorker();
-        await coq.when_created;
+            if (this.package_index)
+                this.project.searchPath.packageIndex = this.package_index;
 
-        var task = new CompileTask(new BatchWorker(coq.worker), this.project);
-        task.on('progress', files => this._progress(files));
-        task.on('report', e => this.report.add(e));
-        return this.out = await task.run();
+            coq = coq || new CoqWorker();
+            coq.options.warn = false;
+            await coq.when_created;
+
+            var task = new CompileTask(new BatchWorker(coq.worker), this.project);
+            task.on('progress', files => this._progress(files));
+            task.on('report', e => this.report.add(e));
+            this.buildTask = task;
+            return this.out = await task.run();
+        }
+        finally { this.view.building = false; this.buildTask = null; }
     }
 
     async download() {
@@ -120,9 +138,9 @@ class ProjectPanel {
     _createDOM() {
         return $('<div>').attr('id', 'project-panel').html(`
             <div class="toolbar">
-                <button @click="$emit('new')">new</button>
-                <button @click="$emit('build')">build</button>
-                <button @click="$emit('download')">download</button>
+                <button @click="$emit('new')"      :disabled="building">new</button>
+                <button @click="$emit('build')">{{building ? 'stop' : 'build'}}</button>
+                <button @click="$emit('download')" :disabled="building">download</button>
             </div>
             <file-list ref="file_list" :files="root"
                        @action="$emit('action', $event)"/>
@@ -160,10 +178,8 @@ class ProjectPanel {
         }
     }
 
-    static attach(container, provider, name) {
-        if (provider.snippets) provider = provider.snippets[0];
-
-        var panel = new ProjectPanel().withEditor(provider);
+    static attach(coq, container, name) {
+        var panel = new ProjectPanel().withCoqManager(coq);
         container.append(panel.$el);
 
         if (name == 'sample')
@@ -179,7 +195,7 @@ class ProjectPanel {
         var vol = new InMemoryVolume();
         vol.fs.writeFileSync('/simple/_CoqProject', '-R . simple\n\nOne.v Two.v Three.v\n');
         vol.fs.writeFileSync('/simple/One.v', 'Check 1.\nFrom simple Require Import Two.');
-        vol.fs.writeFileSync('/simple/Two.v', '\n\nDefinition two_of a := a + a.\n');
+        vol.fs.writeFileSync('/simple/Two.v', 'From Coq Require Import List.\n\nDefinition two_of a := a + a.\n');
         vol.fs.writeFileSync('/simple/Three.v', 'From simple Require Import One Two.');
     
         var proj = new CoqProject('sample', vol).fromDirectory('/');

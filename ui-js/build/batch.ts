@@ -51,10 +51,12 @@ class CompileTask extends EventEmitter{
     batch: BatchWorker
     inproj: CoqProject
     outproj: CoqProject
-    infiles: SearchPathElement[] = []
-    outfiles: SearchPathElement[] = []
+    infiles: SearchPathElement[] = [];
+    outfiles: SearchPathElement[] = [];
 
     opts: CompileTaskOptions
+
+    _stop = false;
 
     constructor(batch: BatchWorker, inproj: CoqProject, opts: CompileTaskOptions = {}) {
         super();
@@ -66,15 +68,28 @@ class CompileTask extends EventEmitter{
     }
 
     async run(outname?: string) {
-        var plan = this.inproj.computeDeps().buildOrder();
+        this._stop = false;
+
+        var coqdep = this.inproj.computeDeps(),
+            plan = coqdep.buildOrder();
+
+        await this.loadPackages(coqdep.extern);
 
         for (let mod of plan) {
-            console.log(mod.physical);
+            if (this._stop) break;
             if (mod.physical.endsWith('.v'))
                 await this.compile(mod);
         }
     
         return this.output(outname);
+    }
+
+    async loadPackages(pkgs: Set<string>) {
+        if (pkgs.size > 0)
+            await this.batch.do(
+                ['LoadPkg', [...pkgs].map(pkg => `+${pkg}`)],
+                msg => msg[0] == 'LoadedPkg'
+            );
     }
 
     async compile(mod: SearchPathElement, opts=this.opts) {
@@ -104,6 +119,8 @@ class CompileTask extends EventEmitter{
             throw e;
         }
     }
+
+    stop() { this._stop = true; }
 
     output(name?: string) {
         if (name) this.outproj.name = name;

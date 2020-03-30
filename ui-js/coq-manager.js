@@ -429,8 +429,7 @@ class CoqManager {
         await this._load('ui-css/project.css');
         await this._load('ui-js/ide-project.browser.js');
 
-        this.project =
-            ideProject.ProjectPanel.attach(pane, this.provider, name);
+        this.project = ideProject.ProjectPanel.attach(this, pane, name);
     }
 
     _load(href) {

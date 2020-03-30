@@ -363,18 +363,26 @@ class PackageIndex {
             this.moduleIndex.set(mod, pkgInfo);
     }
 
-    *findModules(prefix, suffix) {
+    *findModules(prefix, suffix, exact=false) {
+        if (Array.isArray(prefix)) prefix = prefix.join('.');
+        if (Array.isArray(suffix)) suffix = suffix.join('.');
+
         prefix = prefix ? prefix + '.' : '';
-        var dotsuffix = '.' + suffix;
-        for (let k of this.moduleIndex.keys()) {
-            if (k.startsWith(prefix) && (k == suffix || k.endsWith(dotsuffix)))
-                yield k;
+        if (exact) {
+            if (this.moduleIndex.has(prefix + suffix)) yield prefix + suffix;
+        }
+        else {
+            var dotsuffix = '.' + suffix;
+            for (let k of this.moduleIndex.keys()) {
+                if (k.startsWith(prefix) && (k == suffix || k.endsWith(dotsuffix)))
+                    yield k;
+            }
         }
     }
 
-    findPackageDeps(prefix, suffix) {
+    findPackageDeps(prefix, suffix, exact=false) {
         var pdeps = new Set();
-        for (let m of this.alldeps(this.findModules(prefix, suffix)))
+        for (let m of this.alldeps(this.findModules(prefix, suffix, exact)))
             pdeps.add(this.moduleIndex.get(m).name);
         return pdeps;
     }
