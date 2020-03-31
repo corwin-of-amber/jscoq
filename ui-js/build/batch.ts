@@ -68,7 +68,7 @@ class CompileTask extends EventEmitter{
     }
 
     async run(outname?: string) {
-        this._stop = false;
+        if (this._stop) return;
 
         var coqdep = this.inproj.computeDeps(),
             plan = coqdep.buildOrder();

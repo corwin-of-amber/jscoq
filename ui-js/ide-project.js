@@ -2,31 +2,23 @@
 //  parcel watch ui-js/ide-project.js -d _build/jscoq+64bit/ui-js -o ide-project.browser.js --global ideProject
 
 import Vue from 'vue/dist/vue';
+import {VueContext} from 'vue-context';
+import 'vue-context/src/sass/vue-context.scss';
+
 import { BatchWorker, CompileTask } from './build/batch';
 import { CoqProject, InMemoryVolume, ZipVolume } from './build/project';
+import '../ui-css/project.css';
 
-
-
-Object.assign(window, {CoqProject, InMemoryVolume, ZipVolume})
 
 
 class ProjectPanel {
 
-    constructor(el) {
+    constructor() {
         require('./components/file-list');
         require('./components/problem-list');
 
-        el = el || this._createDOM();
-
-        this.view = new Vue({
-            el: el,
-            data: {
-                files: [],
-                status: {},
-                root: [],
-                building: false
-            }
-        });
+        this.view = new (Vue.component('project-panel-default-layout'))();
+        this.view.$mount();
         
         this.view.$watch('files', v => this._update(v, this.view.status));
         this.view.$watch('status', v => this._update(this.view.files, v), {deep: true});
@@ -35,6 +27,11 @@ class ProjectPanel {
         this.view.$on('build', () => this.buildTask ? (this.buildTask.stop())
              : this.build().catch(e => { if (e[0] != 'CoqExn') throw e; }));
         this.view.$on('download', () => this.download());
+
+        this.view.$on('menu:new', () => this.clear());
+        this.view.$on('menu:open', () => this.openDialog());
+        this.view.$on('menu:download-v', () => this.downloadSources());
+        this.view.$on('menu:download-vo', () => this.downloadCompiled());
 
         this.editor_provider = undefined;
         this.package_index = undefined;
@@ -66,7 +63,7 @@ class ProjectPanel {
         let vol = (zip instanceof Promise || zip instanceof Blob) ?
                     await ZipVolume.fromBlob(zip)
                   : new ZipVolume(zip);
-        this.open(new CoqProject(filename.replace(/[.]zip$/, ''), vol)
+        this.open(new CoqProject(filename && filename.replace(/[.]zip$/, ''), vol)
                   .fromDirectory('').copyLogical(new LogicalVolume()));
     }
 
@@ -79,6 +76,15 @@ class ProjectPanel {
         this.open(new CoqProject(name, vol).fromDirectory('/'));
     }
 
+    async openDialog() {
+        var input = $('<input>').attr('type', 'file');
+        input.change(() => {
+            var fl = input[0].files[0];
+            if (fl) this.openZip(fl, fl.name);
+        });
+        input[0].click();
+    }
+
     withEditor(editor_provider /* CmCoqProvider */) {
         this.editor_provider = editor_provider;
         if (this.project) this._associateStore();
@@ -88,7 +94,6 @@ class ProjectPanel {
 
     withCoqManager(coq) {
         this.coq = coq;
-        this.package_index = coq.packages.index;
         return this.withEditor(coq.provider.snippets[0]);
     }
 
@@ -101,50 +106,43 @@ class ProjectPanel {
             if (this.editor_provider && this.editor_provider.dirty)
                 this.editor_provider.saveLocal();
 
-            if (this.package_index)
-                this.project.searchPath.packageIndex = this.package_index;
+            if (this.package_index || this.coq)
+                this.project.searchPath.packageIndex = this.package_index || this.coq.packages.index;
 
             coq = coq || new CoqWorker();
             coq.options.warn = false;
-            await coq.when_created;
 
             var task = new CompileTask(new BatchWorker(coq.worker), this.project);
+            this.buildTask = task;
             task.on('progress', files => this._progress(files));
             task.on('report', e => this.report.add(e));
-            this.buildTask = task;
+            await coq.when_created;
             return this.out = await task.run();
         }
-        finally { this.view.building = false; this.buildTask = null; }
+        finally {
+            this.buildTask = null;
+            this.view.building = false;
+            this.view.compiled = !!this.out;
+        }
     }
 
-    async download() {
-        var fn, zip;
-        if (this.out) {
-            fn = `${this.out.name || 'project'}.coq-pkg`;
-            zip = (await this.out.toPackage(fn, ['.v', '.vo', '.cma'])).pkg.zip;
-        }
-        else if (this.project) {
-            fn = `${this.project.name || 'project'}.zip`;
+    async downloadCompiled() {
+        var fn = `${this.out.name || 'project'}.coq-pkg`,
+        {pkg} = await this.out.toPackage(fn, ['.v', '.vo', '.cma']);
+        await this._download(pkg.zip, fn);
+    }
+    
+    async downloadSources() {
+        var fn = `${this.project.name || 'project'}.zip`,
             zip = await this.project.toZip(undefined, ['.v', '.vo', '.cma']);
-        }
-        else return;
+        await this._download(zip, fn);
+    }
 
+    async _download(zip, fn) {
         var blob = await zip.generateAsync({type: 'blob'}),
             a = $('<a>').attr({'href': URL.createObjectURL(blob),
                                'download': fn});
         a[0].click();
-    }
-
-    _createDOM() {
-        return $('<div>').attr('id', 'project-panel').html(`
-            <div class="toolbar">
-                <button @click="$emit('new')"      :disabled="building">new</button>
-                <button @click="$emit('build')">{{building ? 'stop' : 'build'}}</button>
-                <button @click="$emit('download')" :disabled="building">download</button>
-            </div>
-            <file-list ref="file_list" :files="root"
-                       @action="$emit('action', $event)"/>
-        `)[0]; 
     }
 
     _update(files, status) {
@@ -210,6 +208,60 @@ ProjectPanel.BULLETS = {
     compiled: {text: '✓', class: 'compiled'},
     error: {text: '✗', class: 'error'}
 };
+
+
+Vue.component('project-panel-default-layout', {
+    data: () => (
+        {files: [], status: {}, root: [], building: false, compiled: false}
+    ),
+    template: `
+    <div class="project-panel">
+        <div class="toolbar">
+            <project-context-menu ref="menu" @action="$emit('menu:'+$event.name, $event)"/>
+            <button @click="$emit('build')">{{building ? 'stop' : 'build'}}</button>
+        </div>
+        <file-list ref="file_list" :files="root"
+                   @action="$emit('action', $event)"/>
+    </div>
+    `
+});
+
+Vue.component('project-context-menu', {
+    data: () => ({isOpen: false}),
+    template: `
+    <span class="project-context-menu" :class="{open: isOpen}">
+        <button @click.stop.prevent="open"><hamburger-svg/></button>
+        <vue-context ref="m" @open="isOpen = true" @close="isOpen = false">
+            <li><a name="new" @click="action" :disabled="$root.building">New Project</a></li>
+            <li><a name="open" @click="action" :disabled="$root.building">Open Project...</a></li>
+            <li><a name="download-v" @click="action">Download sources</a></li>
+            <li><a name="download-vo" @click="action" :disabled="$root.building || !$root.compiled">Download compiled</a></li>
+        </vue-context>
+    </span>
+    `,
+    components: {VueContext},
+    methods: {
+        open() {
+            if (this.$refs.m.show) this.$refs.m.close();
+            else
+            this.$refs.m.open({clientX: this.$parent.$el.clientWidth, clientY: 0}); 
+        },
+        action(ev) {
+            if (!$(ev.currentTarget).is('[disabled]'))
+                this.$emit('action', {name: ev.currentTarget.name});
+        }
+    }
+});
+
+Vue.component('hamburger-svg', {
+    template: `
+    <svg viewBox="0 0 80 80">
+        <rect y="5" width="80" height="12"></rect>
+        <rect y="34" width="80" height="12"></rect>
+        <rect y="63" width="80" height="12"></rect>
+    </svg>
+    `
+})
 
 
 class LogicalVolume extends InMemoryVolume {

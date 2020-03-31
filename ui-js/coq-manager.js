@@ -426,19 +426,21 @@ class CoqManager {
 
     async openProject(name) {
         var pane = this.layout.createOutline();
-        await this._load('ui-css/project.css');
-        await this._load('ui-js/ide-project.browser.js');
+        await this._load('ui-js/ide-project.browser.js',
+                         'ui-js/ide-project.browser.css');
 
         this.project = ideProject.ProjectPanel.attach(this, pane, name);
     }
 
-    _load(href) {
-        var uri = this.options.base_path + href,
-            el = href.endsWith('.css') ? 
-                $('<link>').attr({rel: 'stylesheet', type: 'text/css', href: uri})
-              : $('<script>').attr({type: 'text/javascript', src: uri});
-        document.head.appendChild(el[0]); // jQuery messes with load event
-        return new Promise(resolve => el.on('load', resolve));
+    async _load(...hrefs) {
+        for (let href of hrefs) {
+            var uri = this.options.base_path + href,
+                el = href.endsWith('.css') ? 
+                    $('<link>').attr({rel: 'stylesheet', type: 'text/css', href: uri})
+                : $('<script>').attr({type: 'text/javascript', src: uri});
+            document.head.appendChild(el[0]); // jQuery messes with load event
+            await new Promise(resolve => el.on('load', resolve));
+        }
     }
 
     /**
