@@ -1,7 +1,10 @@
-import { FSInterface, fsif_native } from './fsif';
-import { CoqDep } from './coqdep';
+import fs from 'fs';
+import path from 'path';
 import arreq from 'array-equal';
 import JSZip from 'jszip';
+
+import { FSInterface, fsif_native } from './fsif';
+import { CoqDep } from './coqdep';
         
 
 
@@ -369,10 +372,6 @@ interface PackageIndex {
                     exact?: boolean): Set<string>;
 }
 
-
-import fs from 'fs';
-import path from 'path';
-//import JSZip from 'jszip';
 
 abstract class StoreVolume implements FSInterface {
 

@@ -426,8 +426,8 @@ class CoqManager {
 
     async openProject(name) {
         var pane = this.layout.createOutline();
-        await this._load('ui-js/ide-project.browser.js',
-                         'ui-js/ide-project.browser.css');
+        await this._load('ui-js/ide-project.browser.js');
+                         //'ui-js/ide-project.browser.css');   // if using Parcel
 
         this.project = ideProject.ProjectPanel.attach(this, pane, name);
     }
