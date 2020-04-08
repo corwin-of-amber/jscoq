@@ -1,32 +1,16 @@
 import { EventEmitter } from 'events';
+import { FSInterface } from './fsif';
 import { SearchPathElement, CoqProject, InMemoryVolume } from './project';
 
 
 
-class BatchWorker {
+abstract class Batch {
 
-    worker: Worker
+    volume: FSInterface = null;
 
-    constructor(worker: Worker) {
-        this.worker = worker;
-    }
-
-    expect(yes: (msg: any[]) => boolean,
-           no:  (msg: any[]) => boolean = m => this.isError(m)) {
-        const worker = this.worker;
-        return new Promise((resolve, reject) => {
-            function h(ev: any) {
-                if (yes(ev.data))       { cleanup(); resolve(ev.data); }
-                else if (no(ev.data))   { cleanup(); reject(ev.data); }
-            }
-            worker.addEventListener('message', h);
-            function cleanup() { worker.removeEventListener('message', h); }
-        });
-    }    
-
-    command(cmd: any[]) {
-        this.worker.postMessage(cmd);
-    }
+    abstract command(cmd: any[]): void;
+    abstract expect(yes: (msg: any[]) => boolean,
+                    no?: (msg: any[]) => boolean): Promise<any[]>;
 
     async do(...actions: (any[] | ((msg: any[]) => boolean))[]) {
         var replies = [];
@@ -41,30 +25,59 @@ class BatchWorker {
 
     isError(msg: any[]) {
         return ['JsonExn', 'CoqExn'].includes(msg[0]);
+    }    
+}
+
+
+class BatchWorker extends Batch {
+
+    worker: Worker
+
+    constructor(worker: Worker) {
+        super();
+        this.worker = worker;
     }
+
+    command(cmd: any[]) {
+        this.worker.postMessage(cmd);
+    }
+
+    expect(yes: (msg: any[]) => boolean,
+           no:  (msg: any[]) => boolean = m => this.isError(m)) {
+        const worker = this.worker;
+        return new Promise<any[]>((resolve, reject) => {
+            function h(ev: {data: any[]}) {
+                if (yes(ev.data))       { cleanup(); resolve(ev.data); }
+                else if (no(ev.data))   { cleanup(); reject(ev.data); }
+            }
+            worker.addEventListener('message', h);
+            function cleanup() { worker.removeEventListener('message', h); }
+        });
+    }    
 
 }
 
 
 class CompileTask extends EventEmitter{
 
-    batch: BatchWorker
+    batch: Batch
     inproj: CoqProject
     outproj: CoqProject
     infiles: SearchPathElement[] = [];
     outfiles: SearchPathElement[] = [];
+    volume: FSInterface
 
     opts: CompileTaskOptions
 
     _stop = false;
 
-    constructor(batch: BatchWorker, inproj: CoqProject, opts: CompileTaskOptions = {}) {
+    constructor(batch: Batch, inproj: CoqProject, opts: CompileTaskOptions = {}) {
         super();
         this.batch = batch;
         this.inproj = inproj;
         this.opts = opts;
 
-        this.outproj = new CoqProject(inproj.name || 'out', new InMemoryVolume());
+        this.volume = batch.volume || new InMemoryVolume();
     }
 
     async run(outname?: string) {
@@ -100,15 +113,19 @@ class CompileTask extends EventEmitter{
         this.emit('progress', [{filename: physical, status: 'compiling'}]);
 
         try {
-            let [, , [, , vo]] = await this.batch.do(
+            await this.batch.do(
                 ['Init', {top_name: logical.join('.')}],
                 ['Put', infn, volume.fs.readFileSync(physical)],
                 ['Load', infn],            msg => msg[0] == 'Loaded',
-                ['Compile', outfn],        msg => msg[0] == 'Compiled',
-                ['Get', outfn],            msg => msg[0] == 'Got');
-            
-            this.outproj.volume.fs.writeFileSync(outfn, vo);
-            this.outfiles.push({volume: this.outproj.volume, 
+                ['Compile', outfn],        msg => msg[0] == 'Compiled');
+
+            if (!this.batch.volume) {
+                let [[, , vo]] = await this.batch.do(
+                    ['Get', outfn],        msg => msg[0] == 'Got');            
+                this.volume.fs.writeFileSync(outfn, vo);
+            }
+
+            this.outfiles.push({volume: this.volume, 
                                 logical, physical: outfn});
 
             this.emit('progress', [{filename: physical, status: 'compiled'}]);
@@ -123,15 +140,16 @@ class CompileTask extends EventEmitter{
     stop() { this._stop = true; }
 
     output(name?: string) {
-        if (name) this.outproj.name = name;
+        this.outproj = new CoqProject(name || this.inproj.name || 'out',
+                                      this.volume);
         for (let mod of this.outfiles) mod.pkg = this.outproj.name;
         this.outproj.searchPath.addRecursive({physical: '/lib', logical: []});
         this.outproj.setModules(this._files());
         return this.outproj;
     }
         
-    toPackage() {
-        return this.outproj.toPackage(undefined, undefined,
+    toPackage(filename?: string, extensions?: string[]) {
+        return this.outproj.toPackage(filename, extensions,
             this.opts.jscoq ? CoqProject.backportToJsCoq : undefined);
     }
 
@@ -151,4 +169,4 @@ class BuildError { }
 
 
 
-export { BatchWorker, CompileTask, CompileTaskOptions, BuildError }
+export { Batch, BatchWorker, CompileTask, CompileTaskOptions, BuildError }
