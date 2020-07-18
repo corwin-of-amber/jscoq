@@ -1,6 +1,6 @@
 .PHONY: all clean force
-.PHONY: jscoq jscoq_worker libs-pkg links links-clean
-.PHONY: dist dist-upload dist-release
+.PHONY: jscoq jscoq_worker links links-clean
+.PHONY: dist dist-upload dist-release server
 
 -include ./config.inc
 
@@ -43,7 +43,7 @@ COQPKGS_ROOT := $(current_dir)/_build/$(BUILD_CONTEXT)/coq-pkgs
 
 DUNE_FLAGS := ${if $(DUNE_WORKSPACE), --workspace=$(DUNE_WORKSPACE),}
 
-NJOBS=4
+NJOBS ?= 4
 
 export NJOBS
 export BUILD_CONTEXT
@@ -54,13 +54,13 @@ export COQBUILDDIR_REL
 export ADDONS_PATH
 export COQPKGS_ROOT
 
-ADDONS = mathcomp # elpi equations dsp # iris
+# Addons supported in jsCoq 0.11
+ADDONS = mathcomp # extlib simpleio quickchick elpi equations dsp
 
 all:
 	@echo "Welcome to jsCoq makefile. Targets are:"
 	@echo ""
 	@echo "     jscoq: build jscoq [javascript and libraries]"
-	@echo "  libs-pkg: build packages bundle [experimental]"
 	@echo ""
 	@echo "     links: create links that allow to serve pages from the source tree"
 	@echo ""
@@ -72,9 +72,6 @@ jscoq: force
 
 jscoq_worker:
 	ADDONS="$(ADDONS)" dune build @jscoq_worker $(DUNE_FLAGS)
-
-libs-pkg: force
-	ADDONS="$(ADDONS)" dune build @libs-pkg $(DUNE_FLAGS) --force
 
 links:
 	ln -sf _build/$(BUILD_CONTEXT)/coq-pkgs .
@@ -104,37 +101,45 @@ clean:
 
 BUILDDIR=_build/$(BUILD_CONTEXT)
 BUILDOBJ=${addprefix $(BUILDDIR)/./, \
-	index.html coq-js/jscoq_worker.bc.js \
-	coq-pkgs ui-js ui-css ui-images examples \
+	coq-js/jscoq_worker.bc.js coq-pkgs \
+	ui-js ui-css ui-images examples \
 	node_modules ui-external/CodeMirror-TeX-input}
+DISTOBJ = README.md index.html package.json package-lock.json $(BUILDOBJ)
 DISTDIR=_build/dist
 
 PACKAGE_VERSION = ${shell node -p 'require("./package.json").version'}
 
 dist: jscoq
 	mkdir -p $(DISTDIR)
-	rsync -avpR --delete README.md $(BUILDOBJ) $(DISTDIR)
+	rsync -apR --delete $(DISTOBJ) $(DISTDIR)
 
-TAREXCLUDE = --exclude node_modules --exclude '*.vo' --exclude '*.cma'
+TAREXCLUDE = --exclude node_modules --exclude '*.cma' \
+    ${foreach dir, Coq Ltac2 mathcomp, \
+		--exclude '${dir}/**/*.vo' --exclude '${dir}/**/*.cma.js'}
 
 dist-tarball: dist
 	# Hack to make the tar contain a jscoq-x.x directory
+	@rm -f _build/jscoq-$(PACKAGE_VERSION)
 	ln -fs dist _build/jscoq-$(PACKAGE_VERSION)
-	tar zcf $(DISTDIR)/jscoq-$(PACKAGE_VERSION).tar.gz   \
+	tar zcf /tmp/jscoq-$(PACKAGE_VERSION).tar.gz   \
 	    -C _build $(TAREXCLUDE) --exclude '*.bak' --exclude '*.tar.gz' \
 	    --dereference jscoq-$(PACKAGE_VERSION)
+	mv /tmp/jscoq-$(PACKAGE_VERSION).tar.gz $(DISTDIR)
+	@rm -f _build/jscoq-$(PACKAGE_VERSION)
 
-NPMOBJ = ${filter-out %/node_modules %/index.html, $(BUILDOBJ)}
-NPMOBJ += README.md package.json package-lock.json
-NPMEXCLUDE = --delete-excluded --exclude '*.vo' --exclude '*.cma'
+NPMOBJ = ${filter-out %/node_modules %/index.html, $(DISTOBJ)}
+NPMSTAGEDIR = _build/package
+NPMEXCLUDE = --delete-excluded --exclude '*.cma' \
+    ${foreach dir, Coq Ltac2 mathcomp, \
+		--exclude '${dir}/**/*.vo' --exclude '${dir}/**/*.cma.js'}
 
 dist-npm:
-	mkdir -p $(DISTDIR)
-	rsync -avpR --delete $(NPMEXCLUDE) $(NPMOBJ) $(DISTDIR)
-	cp docs/npm-landing.html $(DISTDIR)/index.html
-	sed -i.bak 's/\(is_npm:\) false/\1 true/' $(DISTDIR)/ui-js/jscoq-loader.js
+	mkdir -p $(NPMSTAGEDIR) $(DISTDIR)
+	rsync -apR --delete $(NPMEXCLUDE) $(NPMOBJ) $(NPMSTAGEDIR)
+	cp docs/npm-landing.html $(NPMSTAGEDIR)/index.html
+	sed -i.bak 's/\(is_npm:\) false/\1 true/' $(NPMSTAGEDIR)/ui-js/jscoq-loader.js
 	tar zcf $(DISTDIR)/jscoq-$(PACKAGE_VERSION)-npm.tar.gz   \
-	    -C $(DISTDIR) --exclude '*.bak' --exclude '*.tar.gz' .
+	    -C ${dir $(NPMSTAGEDIR)} --exclude '*.bak' ${notdir $(NPMSTAGEDIR)}
 
 ########################################################################
 # Local stuff and distributions
@@ -157,9 +162,10 @@ all-dist: dist dist-release dist-upload
 # Externals
 ########################################################################
 
-.PHONY: coq coq-get coq-build
+.PHONY: coq coq-get coq-get-latest coq-build
 
-COQ_BRANCH=v8.11
+COQ_BRANCH=V8.11.1
+COQ_BRANCH_LATEST=v8.11
 COQ_REPOS=https://github.com/coq/coq.git
 
 COQ_PATCHES = trampoline cps timeout $(COQ_PATCHES|$(WORD_SIZE)) $(COQ_PATCHES|$(ARCH))
@@ -175,6 +181,9 @@ coq-get: $(COQSRC)
 	cd $(COQSRC) && ./configure -prefix $(COQDIR) -native-compiler no -bytecode-compiler no -coqide no
 	dune build @vodeps $(DUNE_FLAGS)
 	cd $(COQSRC) && dune exec ./tools/coq_dune.exe $(DUNE_FLAGS) --context="$(BUILD_CONTEXT)" $(COQBUILDDIR)/.vfiles.d
+
+coq-get-latest: COQ_BRANCH = $(COQ_BRANCH_LATEST)
+coq-get-latest: coq-get
 
 # Coq should be now be built by composition with the Dune setup
 coq-build:
@@ -196,3 +205,7 @@ addons: addons-get addons-build
 
 test:
 	npx mocha tests/main.js
+
+server:
+	npx http-server _build/jscoq+32bit &
+	google-chrome http://127.0.0.1:8080 &

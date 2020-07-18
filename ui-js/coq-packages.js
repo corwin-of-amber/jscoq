@@ -36,7 +36,7 @@ class PackageManager {
         this.packages_by_uri = {};
 
         // normalize all URI paths to end with a slash
-        let mkpath = path => aliases[path] || path.replace(/(?<![/])$/, '/');
+        let mkpath = path => aliases[path] || path.replace(/([^/])$/, '$1/');
 
         for (let [key, pkg_names] of Object.entries(packages)) {
             let base_uri = mkpath(key);
@@ -165,6 +165,7 @@ class PackageManager {
                                             endsWith(pkg_id, suffix);
 
         for (let pkg of this.packages) {
+            if (!pkg.info) continue;
             for (let prefix of pkg.info.pkgs) {
                 if (pkg_matches(prefix.pkg_id) &&
                     prefix.vo_files.some(entry => possible_filenames.indexOf(entry[0]) > -1))

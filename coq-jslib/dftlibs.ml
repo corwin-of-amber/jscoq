@@ -356,7 +356,6 @@ let pkgs : (string * string list * (string list * selector) list) list =
   ; "elpi", [ ], all_of
     [ [ "elpi" ]
     ; [ "elpi" ; "ltac" ]
-    ; [ "elpi" ; "test" ]
     ; [ "elpi" ; "tutorial" ]
     ; [ "elpi" ; "derive" ]
     ]
@@ -366,4 +365,10 @@ let pkgs : (string * string list * (string list * selector) list) list =
     ; [ "Equations" ; "Prop" ]
     ]
 
+  ; "simpleio", [ "extlib" ], all_of
+    [ [ "SimpleIO" ] ]
+
+  ; "quickchick", [ "coq-reals"; "extlib" ; "simpleio" ], all_of
+    [ [ "QuickChick" ]
+    ]
   ]

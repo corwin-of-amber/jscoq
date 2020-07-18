@@ -1,6 +1,28 @@
 const path = require('path');
+const webpack = require('webpack');
 
-module.exports = {
+module.exports = [
+{
+  name: 'cli',
+  target: 'node',
+  entry: './coq-jslib/cli.ts',
+  mode: 'development',
+  devtool: "source-map",
+  stats: {
+    hash: false, version: false, modules: false  // reduce verbosity
+  },
+  output: {
+    filename: 'cli.js',
+    path: __dirname   // should be run by Dune in _build/*
+  },
+  plugins: [
+    new webpack.BannerPlugin({banner: '#!/usr/bin/env node', raw: true}),
+    new webpack.optimize.LimitChunkCountPlugin({maxChunks: 1})
+  ],
+  node: false
+},
+{
+  name: 'ide-project',
   mode: 'development',
   entry: './ui-js/ide-project.js',
   output: {
@@ -33,4 +55,5 @@ module.exports = {
   resolve: {
     extensions: [ '.tsx', '.ts', '.js' ],
   }
-};
+}
+];
