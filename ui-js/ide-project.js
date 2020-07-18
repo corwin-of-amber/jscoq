@@ -5,8 +5,8 @@ import Vue from 'vue/dist/vue';
 import {VueContext} from 'vue-context';
 import 'vue-context/src/sass/vue-context.scss';
 
-import { BatchWorker, CompileTask } from './build/batch';
-import { CoqProject, InMemoryVolume, ZipVolume } from './build/project';
+import { BatchWorker, CompileTask } from '../coq-jslib/build/batch';
+import { CoqProject, InMemoryVolume, ZipVolume } from '../coq-jslib/build/project';
 import '../ui-css/project.css';
 
 
